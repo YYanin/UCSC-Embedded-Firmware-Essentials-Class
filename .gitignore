@@ -1,0 +1,7 @@
+# week3: Ignore everything except task_priority directory
+week3/*
+!week3/task_priority/
+
+# week1: Ignore everything except EmbeddedFirmwareEssentialsClass directory
+week1/*
+!week1/EmbeddedFirmwareEssentialsClass/
