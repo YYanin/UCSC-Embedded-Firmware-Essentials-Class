@@ -5,3 +5,6 @@ week3/*
 # week1: Ignore everything except EmbeddedFirmwareEssentialsClass directory
 week1/*
 !week1/EmbeddedFirmwareEssentialsClass/
+
+# Ignore AgentConstraints.md files everywhere
+**/AgentConstraints.md
