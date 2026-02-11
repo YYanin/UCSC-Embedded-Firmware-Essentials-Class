@@ -1,0 +1,22 @@
+# ESP32 Partition Table for Shell Project
+# Name,   Type, SubType, Offset,  Size, Flags
+# ============================================================================
+# This partition table allocates space for:
+# - NVS (Non-Volatile Storage): Stores configuration settings
+# - PHY Init Data: WiFi/BT calibration data (required by ESP-IDF)
+# - Factory App: The main shell application
+# - SPIFFS: Filesystem storage for user files
+# ============================================================================
+
+# NVS partition for storing persistent configuration
+nvs,      data, nvs,     0x9000,  0x6000,
+
+# PHY calibration data partition (required)
+phy_init, data, phy,     0xf000,  0x1000,
+
+# Main application partition - 1.5MB for the shell binary
+factory,  app,  factory, 0x10000, 0x180000,
+
+# SPIFFS filesystem partition - 1MB for user files
+# This is where the virtual filesystem will store files
+storage,  data, spiffs,  0x190000, 0x100000,

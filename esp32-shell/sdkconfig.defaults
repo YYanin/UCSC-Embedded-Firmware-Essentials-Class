@@ -1,0 +1,76 @@
+# ESP32 Shell - SDK Configuration Defaults
+# ============================================================================
+# These are the default configuration values for the ESP32 shell port.
+# PlatformIO will use these when building the project.
+# ============================================================================
+
+# ============================================================================
+# SPIFFS Filesystem Configuration
+# ============================================================================
+# Enable SPIFFS for file storage
+CONFIG_SPIFFS_MAX_PARTITIONS=1
+CONFIG_SPIFFS_CACHE=y
+CONFIG_SPIFFS_CACHE_WR=y
+CONFIG_SPIFFS_PAGE_SIZE=256
+CONFIG_SPIFFS_OBJ_NAME_LEN=64
+
+# ============================================================================
+# Console / UART Configuration
+# ============================================================================
+# Enable UART for console I/O
+CONFIG_ESP_CONSOLE_UART_DEFAULT=y
+CONFIG_ESP_CONSOLE_UART_BAUDRATE=115200
+
+# ============================================================================
+# FreeRTOS Configuration
+# ============================================================================
+# Stack size for main task (shell needs larger stack for parsing)
+CONFIG_ESP_MAIN_TASK_STACK_SIZE=8192
+
+# Enable FreeRTOS features we need
+CONFIG_FREERTOS_HZ=1000
+CONFIG_FREERTOS_USE_TRACE_FACILITY=y
+CONFIG_FREERTOS_USE_STATS_FORMATTING_FUNCTIONS=y
+
+# ============================================================================
+# Memory Configuration
+# ============================================================================
+# Optimize for RAM usage
+CONFIG_ESP32_IRAM_AS_8BIT_ACCESSIBLE_MEMORY=n
+CONFIG_COMPILER_OPTIMIZATION_SIZE=y
+
+# CPU frequency - 160MHz is a good balance of performance and power
+CONFIG_ESP_DEFAULT_CPU_FREQ_MHZ=160
+CONFIG_ESP_DEFAULT_CPU_FREQ_160=y
+
+# Use single core for simpler FreeRTOS scheduler (ESP32-S3 is dual-core)
+# Commented out - ESP32-S3 uses both cores by default for better performance
+# CONFIG_FREERTOS_UNICORE=y
+
+# ============================================================================
+# Logging Configuration
+# ============================================================================
+# Set default log level to info (can be changed at runtime)
+CONFIG_LOG_DEFAULT_LEVEL_INFO=y
+CONFIG_LOG_DEFAULT_LEVEL=3
+
+# ============================================================================
+# Partition Table
+# ============================================================================
+# Use custom partition table
+CONFIG_PARTITION_TABLE_CUSTOM=y
+CONFIG_PARTITION_TABLE_CUSTOM_FILENAME="partitions.csv"
+
+# ============================================================================
+# Newlib Configuration
+# ============================================================================
+# Enable full newlib for standard C library support
+CONFIG_NEWLIB_STDIN_LINE_ENDING_LF=y
+CONFIG_NEWLIB_STDOUT_LINE_ENDING_LF=y
+
+# ============================================================================
+# Flash Configuration
+# ============================================================================
+# ESP32-S3-DevKitC-1 has 8MB flash
+CONFIG_ESPTOOLPY_FLASHSIZE_8MB=y
+CONFIG_ESPTOOLPY_FLASHSIZE="8MB"
