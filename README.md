@@ -11,6 +11,10 @@ projects/
 ├── seven_segment_counter/  # 7-segment display counter
 ├── week1/                  # Week 1 class materials
 │   └── EmbeddedFirmwareEssentialsClass/
+│       ├── README.md
+│       ├── IMG_3892.MOV
+│       ├── IMG_3893.MOV
+│       └── IMG_3894.MOV
 └── week3/                  # Week 3 class materials
     └── task_priority/      # FreeRTOS task priority demo
 ```
