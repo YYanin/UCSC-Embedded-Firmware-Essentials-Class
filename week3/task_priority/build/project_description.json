@@ -1,7 +1,7 @@
 {
     "version":            "1.1",
     "project_name":       "task_priority",
-    "project_version":    "e22a18b-dirty",
+    "project_version":    "a351be3-dirty",
     "project_path":       "/home/nordiffico/esp/projects/week3/task_priority",
     "idf_path":           "/home/nordiffico/esp/esp-idf",
     "build_dir":          "/home/nordiffico/esp/projects/week3/task_priority/build",

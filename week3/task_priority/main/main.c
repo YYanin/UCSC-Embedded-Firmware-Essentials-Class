@@ -74,6 +74,13 @@ static const char *TAG = "TASK_PRIORITY";
 // Change this if using a different GPIO pin for your button
 #define BUTTON_GPIO         GPIO_NUM_0
 
+// GPIO configuration for LED outputs
+// 4 LEDs connected to GPIOs 4, 5, 6, and 7
+// These will light up in sequence when the button is pressed
+#define LED_GPIO_START      GPIO_NUM_4   // First LED GPIO (GPIO 4)
+#define LED_GPIO_END        GPIO_NUM_7   // Last LED GPIO (GPIO 7)
+#define NUM_LEDS            4            // Total number of LEDs
+
 /* ============================================================================
  * GLOBAL VARIABLES
  * ============================================================================ */
@@ -81,6 +88,10 @@ static const char *TAG = "TASK_PRIORITY";
 // Binary semaphore handle for Task4 synchronization
 // This semaphore is "given" by the button ISR and "taken" by Task4
 static SemaphoreHandle_t xTask4Semaphore = NULL;
+
+// Index tracking which LED in the sequence should light up next
+// Cycles through 0, 1, 2, 3, 0, 1, 2, 3, ... with each button press
+static volatile int current_led_index = 0;
 
 /* ============================================================================
  * FUNCTION PROTOTYPES
@@ -97,6 +108,7 @@ static void gpio_isr_handler(void *arg);
 
 // Initialization functions
 static void init_gpio_button(void);
+static void init_gpio_leds(void);
 static void create_tasks(void);
 
 /* ============================================================================
@@ -221,9 +233,12 @@ static void vTask3_Periodic3000ms(void *pvParameters)
  * 
  * This task is the highest priority application task. It remains blocked
  * on a binary semaphore until a button press triggers the GPIO ISR,
- * which releases the semaphore. Once unblocked, Task4 continues running
- * and printing while the button is held down. When the button is released,
- * Task4 prints the blocking indicator and returns to waiting on the semaphore.
+ * which releases the semaphore. Once unblocked, Task4 lights up one of
+ * the 4 LEDs (GPIOs 4-7) in sequence. The LED stays on while the button
+ * is held. When the button is released, the LED turns off and the next
+ * button press will light up the next LED in the sequence.
+ * 
+ * LED Sequence: GPIO4 -> GPIO5 -> GPIO6 -> GPIO7 -> GPIO4 -> ...
  * 
  * When running, Task4 preempts ALL other application tasks.
  * 
@@ -243,8 +258,15 @@ static void vTask4_SemaphoreTriggered(void *pvParameters)
         if (xSemaphoreTake(xTask4Semaphore, portMAX_DELAY) == pdTRUE)
         {
             // Semaphore acquired - button was pressed
-            // Print running indicator - the <- arrow shows task is active
-            printf("Tsk4-P4 <-\n");
+            // Calculate which GPIO to light up based on current_led_index
+            // LED GPIOs are 4, 5, 6, 7 so we add LED_GPIO_START to the index
+            gpio_num_t current_led_gpio = LED_GPIO_START + current_led_index;
+            
+            // Turn ON the current LED in the sequence
+            gpio_set_level(current_led_gpio, 1);
+            
+            // Print which LED is now lit
+            printf("Tsk4-P4 <- LED%d (GPIO%d) ON\n", current_led_index, current_led_gpio);
             
             // Continue running while the button is held down (GPIO reads LOW when pressed)
             // The button has a pull-up resistor, so:
@@ -252,20 +274,24 @@ static void vTask4_SemaphoreTriggered(void *pvParameters)
             //   - Button released = GPIO level is 1 (HIGH)
             while (gpio_get_level(BUTTON_GPIO) == 0)
             {
-                // Print to show Task4 is still active while button is held
-                printf("Tsk4-P4 <-\n");
-                
-                // Small delay to prevent flooding the console
-                // Also allows the scheduler to check for other events
+                // LED remains on while button is held
+                // Small delay to prevent flooding the scheduler
                 vTaskDelay(TASK4_RUN_TICKS);
             }
             
-            // Button has been released - clear any pending semaphore gives
-            // that may have occurred from button bounce during release
-            xSemaphoreTake(xTask4Semaphore, 0);
+            // Button has been released - turn OFF the current LED
+            gpio_set_level(current_led_gpio, 0);
             
-            // Print blocking indicator - the -> arrow shows task is about to block
-            printf("Tsk4-P4 ->\n");
+            // Print that the LED is now off
+            printf("Tsk4-P4 -> LED%d (GPIO%d) OFF\n", current_led_index, current_led_gpio);
+            
+            // Advance to the next LED in the sequence for the next button press
+            // Uses modulo to wrap around: 0 -> 1 -> 2 -> 3 -> 0 -> 1 -> ...
+            current_led_index = (current_led_index + 1) % NUM_LEDS;
+            
+            // Clear any pending semaphore gives that may have occurred 
+            // from button bounce during release
+            xSemaphoreTake(xTask4Semaphore, 0);
             
             // Loop back to xSemaphoreTake to wait for next button press
         }
@@ -349,6 +375,54 @@ static void init_gpio_button(void)
     ESP_ERROR_CHECK(gpio_isr_handler_add(BUTTON_GPIO, gpio_isr_handler, NULL));
     
     ESP_LOGI(TAG, "Button GPIO %d configured with interrupt on falling edge", BUTTON_GPIO);
+}
+
+/**
+ * @brief Initialize GPIOs for LED outputs
+ * 
+ * Configures GPIO pins 4 through 7 as outputs for the 4 LEDs.
+ * All LEDs start in the OFF state (low level).
+ * The LEDs will be controlled by Task4 in a sequential pattern.
+ */
+static void init_gpio_leds(void)
+{
+    // Create a bitmask for all 4 LED GPIOs (GPIO 4, 5, 6, 7)
+    // Bit shift creates: 0b11110000 in the appropriate position
+    uint64_t led_pin_mask = 0;
+    for (int i = LED_GPIO_START; i <= LED_GPIO_END; i++)
+    {
+        led_pin_mask |= (1ULL << i);
+    }
+    
+    // GPIO configuration structure for LED outputs
+    gpio_config_t io_conf = {
+        // Bit mask of the GPIO pins to configure (GPIOs 4, 5, 6, 7)
+        .pin_bit_mask = led_pin_mask,
+        
+        // Set as output mode - we control these pins to turn LEDs on/off
+        .mode = GPIO_MODE_OUTPUT,
+        
+        // Disable pull-up resistor (not needed for outputs)
+        .pull_up_en = GPIO_PULLUP_DISABLE,
+        
+        // Disable pull-down resistor (not needed for outputs)
+        .pull_down_en = GPIO_PULLDOWN_DISABLE,
+        
+        // No interrupt for output pins
+        .intr_type = GPIO_INTR_DISABLE,
+    };
+    
+    // Apply the configuration to all LED GPIO pins
+    ESP_ERROR_CHECK(gpio_config(&io_conf));
+    
+    // Initialize all LEDs to OFF state (low level)
+    // This ensures LEDs start in a known state
+    for (int i = LED_GPIO_START; i <= LED_GPIO_END; i++)
+    {
+        gpio_set_level(i, 0);
+    }
+    
+    ESP_LOGI(TAG, "LED GPIOs %d-%d configured as outputs (all OFF)", LED_GPIO_START, LED_GPIO_END);
 }
 
 /* ============================================================================
@@ -460,7 +534,10 @@ void app_main(void)
     ESP_LOGI(TAG, "Task2 (P2): Periodic 500ms");
     ESP_LOGI(TAG, "Task3 (P3): Periodic 3000ms, runs 5s");
     ESP_LOGI(TAG, "Task4 (P4): Button-triggered, highest priority");
-    ESP_LOGI(TAG, "Press BOOT button (GPIO %d) to trigger Task4", BUTTON_GPIO);
+    ESP_LOGI(TAG, "========================================");
+    ESP_LOGI(TAG, "LED Control: 4 LEDs on GPIOs %d-%d", LED_GPIO_START, LED_GPIO_END);
+    ESP_LOGI(TAG, "Press BOOT button (GPIO %d) to light LEDs in sequence", BUTTON_GPIO);
+    ESP_LOGI(TAG, "Hold button = LED stays on, Release = LED off");
     ESP_LOGI(TAG, "========================================");
     
     // Step 1: Create the binary semaphore for Task4
@@ -477,7 +554,10 @@ void app_main(void)
     // Step 2: Initialize GPIO for button input with interrupt
     init_gpio_button();
     
-    // Step 3: Create all four tasks
+    // Step 3: Initialize GPIO for LED outputs
+    init_gpio_leds();
+    
+    // Step 4: Create all four tasks
     create_tasks();
     
     ESP_LOGI(TAG, "All tasks created. Scheduler running...");
