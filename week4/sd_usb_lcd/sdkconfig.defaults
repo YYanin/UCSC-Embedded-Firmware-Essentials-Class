@@ -1,0 +1,21 @@
+# sdkconfig.defaults for SD Card USB MSC project
+# This file contains default configuration settings for the project
+
+# Enable TinyUSB Mass Storage Class
+# This is required for USB MSC functionality
+CONFIG_TINYUSB_MSC_ENABLED=y
+
+# USB TinyUSB configuration
+CONFIG_TINYUSB_DESC_USE_ESPRESSIF_VID=y
+CONFIG_TINYUSB_DESC_USE_DEFAULT_PID=n
+
+# FAT filesystem settings
+# Enable long filename support (heap allocation)
+CONFIG_FATFS_LFN_HEAP=y
+
+# On chips with USB Serial JTAG, we use UART for the console
+# since USB port will be used for MSC
+CONFIG_ESP_CONSOLE_SECONDARY_NONE=y
+
+# Flash size - adjust based on your board
+CONFIG_ESPTOOLPY_FLASHSIZE_4MB=y

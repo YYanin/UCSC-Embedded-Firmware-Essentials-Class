@@ -1,0 +1,10 @@
+## IDF Component Manager Manifest File
+dependencies:
+  ## Required IDF version
+  idf:
+    version: ">=5.0.0"
+  ## TinyUSB component for USB Mass Storage Class
+  ## This component provides USB MSC functionality with direct SD card sector access
+  ## (uses sdmmc_read_sectors/write_sectors internally, NOT POSIX file I/O)
+  espressif/esp_tinyusb:
+    version: "^1.4.2"
