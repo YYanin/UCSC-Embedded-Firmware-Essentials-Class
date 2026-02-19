@@ -36,7 +36,7 @@
 #include "freertos/semphr.h"
 #include "freertos/timers.h"
 #include "driver/gpio.h"
-#include "driver/spi_master.h"
+#include "driver/sdmmc_host.h"
 #include "driver/i2c.h"
 #include "esp_log.h"
 #include "esp_vfs_fat.h"
@@ -53,42 +53,44 @@
 static const char *TAG = "SD_USB_LCD";
 
 /* ============================================================================
- * SD CARD SPI INTERFACE GPIO CONFIGURATION
+ * SD CARD SDMMC INTERFACE GPIO CONFIGURATION (For onboard SD slot)
  * ============================================================================
  * 
- * The SD card is connected via SPI interface. ESP32-S3 has flexible GPIO 
- * matrix allowing SPI signals to be routed to most GPIO pins.
+ * The SD card is connected via SDMMC interface (1-line or 4-line mode).
+ * This is used for boards with built-in SD card slots like Freenove ESP32-S3.
  * 
- * Pin selection rationale:
- * - GPIO 10-13 are commonly used for SPI2 on ESP32-S3
- * - These pins do not conflict with:
- *   - GPIO 0: BOOT button (used in Week 3)
- *   - GPIO 4-7: LEDs (used in Week 3)
- *   - GPIO 8-9: Reserved for I2C (used by LCD)
+ * SDMMC is faster than SPI and uses the following signals:
+ * - CLK:  Clock signal
+ * - CMD:  Command/response line (bidirectional)
+ * - D0:   Data line 0 (required for 1-line mode)
+ * - D1-D3: Additional data lines (optional, for 4-line mode)
  * 
- * IMPORTANT: Connect the SD card module as follows:
- *   SD Card Module    ESP32-S3 GPIO
- *   -------------     -------------
- *   MOSI (DI)     --> GPIO 11
- *   MISO (DO)     --> GPIO 13
- *   CLK (SCLK)    --> GPIO 12
- *   CS (SS)       --> GPIO 10
- *   VCC           --> 3.3V
- *   GND           --> GND
+ * COMMON FREENOVE ESP32-S3 BOARD PINOUT:
+ *   Signal    GPIO
+ *   ------    ----
+ *   CLK   --> GPIO 39
+ *   CMD   --> GPIO 40
+ *   D0    --> GPIO 41
+ * 
+ * NOTE: If your board has different pins, check the schematic and update
+ * the GPIO definitions below. The board may also use 4-line mode with:
+ *   D1    --> GPIO 42
+ *   D2    --> GPIO 1
+ *   D3    --> GPIO 2
  */
-#define SD_MOSI_GPIO        GPIO_NUM_11  // Master Out Slave In - data to SD card
-#define SD_MISO_GPIO        GPIO_NUM_13  // Master In Slave Out - data from SD card
-#define SD_CLK_GPIO         GPIO_NUM_12  // SPI clock signal
-#define SD_CS_GPIO          GPIO_NUM_10  // Chip Select - active low
 
-// SPI host to use for SD card (SPI2_HOST is available on ESP32-S3)
-// SPI1_HOST is typically used for flash memory
-#define SD_SPI_HOST         SPI2_HOST
+// SDMMC GPIO pins for Freenove ESP32-S3-WROOM (hardcoded on board - do not modify)
+#define SD_MMC_CMD_GPIO     GPIO_NUM_38  // SDMMC Command
+#define SD_MMC_CLK_GPIO     GPIO_NUM_39  // SDMMC Clock
+#define SD_MMC_D0_GPIO      GPIO_NUM_40  // SDMMC Data 0
 
-// SPI clock frequencies for SD card
-// Start with low frequency for initialization, then increase for data transfer
-#define SD_SPI_FREQ_INIT_KHZ    400     // 400kHz for card initialization
-#define SD_SPI_FREQ_DEFAULT_KHZ 20000   // 20MHz for normal operation (can go up to 40MHz)
+// Uncomment these for 4-line SDMMC mode (faster, but uses more pins)
+// #define SD_MMC_D1_GPIO   GPIO_NUM_42  // SDMMC Data 1
+// #define SD_MMC_D2_GPIO   GPIO_NUM_1   // SDMMC Data 2
+// #define SD_MMC_D3_GPIO   GPIO_NUM_2   // SDMMC Data 3
+
+// Use 1-line mode by default (more compatible, fewer pins)
+#define SDMMC_USE_1_LINE_MODE  1
 
 // SD card mount point in the virtual file system
 // All file operations will use this path prefix (e.g., "/sdcard/test.txt")
@@ -178,6 +180,9 @@ static sdmmc_card_t *sd_card = NULL;
 // When true, local file operations should be disabled to prevent conflicts
 static volatile bool usb_msc_active = false;
 
+// Flag to track if SD card initialized successfully (for status display)
+static volatile bool sd_card_initialized = false;
+
 // Mutex for coordinating access between USB and local operations
 static SemaphoreHandle_t sd_access_mutex = NULL;
 
@@ -225,21 +230,22 @@ static void usb_msc_task(void *pvParameters);
  * ============================================================================ */
 
 /**
- * @brief Initialize SD card via SPI and mount FAT file system
+ * @brief Initialize SD card via SDMMC and mount FAT file system
  * 
  * This function performs the complete SD card initialization sequence:
  * 
- * 1. SPI Bus Initialization:
- *    - Configures the SPI2 peripheral with MOSI, MISO, and CLK pins
- *    - Uses DMA channel for efficient data transfer
- *    - Clock starts at 400kHz for card detection, increases after init
+ * 1. SDMMC Host Configuration:
+ *    - Configures the SDMMC peripheral for 1-line or 4-line mode
+ *    - Sets up clock, command, and data GPIO pins
+ *    - Faster than SPI mode, commonly used for onboard SD slots
  * 
- * 2. SD Card Slot Configuration:
- *    - Configures the chip select (CS) GPIO pin
- *    - Sets up card detect (CD) if available (not used here)
+ * 2. Slot Configuration:
+ *    - Configures GPIO pins for SDMMC signals
+ *    - Sets bus width (1-line or 4-line)
+ *    - Enables internal pull-ups if needed
  * 
  * 3. FAT File System Mount:
- *    - Uses esp_vfs_fat_sdspi_mount() to mount the SD card
+ *    - Uses esp_vfs_fat_sdmmc_mount() to mount the SD card
  *    - Creates Virtual File System (VFS) at mount point "/sdcard"
  *    - Does NOT auto-format if mount fails (preserves existing data)
  * 
@@ -254,51 +260,64 @@ static esp_err_t sd_card_init(void)
 {
     esp_err_t ret;
     
-    ESP_LOGI(TAG, "Initializing SD card...");
+    ESP_LOGI(TAG, "Initializing SD card via SDMMC interface...");
+    ESP_LOGI(TAG, "SDMMC pins: CLK=%d, CMD=%d, D0=%d", 
+             SD_MMC_CLK_GPIO, SD_MMC_CMD_GPIO, SD_MMC_D0_GPIO);
     
     /* ========================================================================
-     * STEP 1: Configure and initialize the SPI bus
+     * STEP 1: Configure SDMMC host
      * ========================================================================
      * 
-     * The SPI bus must be initialized before we can communicate with the SD card.
-     * We configure:
-     * - MOSI (Master Out Slave In): Data from ESP32 to SD card
-     * - MISO (Master In Slave Out): Data from SD card to ESP32
-     * - SCLK (Serial Clock): Clock signal generated by ESP32
+     * SDMMC_HOST_DEFAULT() configures the SDMMC peripheral with default settings.
+     * We'll use slot 1 which is available on ESP32-S3.
      * 
-     * Note: We don't set max_transfer_sz here because esp_vfs_fat_sdspi_mount
-     * will handle the appropriate transfer size for SD card operations.
+     * The SDMMC interface is faster than SPI:
+     * - 1-line mode: Up to 50 MHz, one data line
+     * - 4-line mode: Up to 50 MHz, four data lines (4x faster throughput)
      */
-    spi_bus_config_t bus_cfg = {
-        .mosi_io_num = SD_MOSI_GPIO,      // GPIO 11 - data to SD card
-        .miso_io_num = SD_MISO_GPIO,      // GPIO 13 - data from SD card
-        .sclk_io_num = SD_CLK_GPIO,       // GPIO 12 - clock signal
-        .quadwp_io_num = -1,              // Not used for SD card (quad SPI write protect)
-        .quadhd_io_num = -1,              // Not used for SD card (quad SPI hold)
-        .max_transfer_sz = 4000,          // Maximum transfer size in bytes
-    };
+    sdmmc_host_t host = SDMMC_HOST_DEFAULT();
     
-    // Initialize the SPI bus
-    // SPI_DMA_CH_AUTO lets the driver automatically select a DMA channel
-    // DMA (Direct Memory Access) allows data transfer without CPU intervention
-    ret = spi_bus_initialize(SD_SPI_HOST, &bus_cfg, SPI_DMA_CH_AUTO);
-    if (ret != ESP_OK) {
-        ESP_LOGE(TAG, "Failed to initialize SPI bus: %s", esp_err_to_name(ret));
-        return ret;
-    }
-    ESP_LOGI(TAG, "SPI bus initialized successfully");
+    // Use 1-line mode for better compatibility (fewer pins required)
+    // 4-line mode is faster but needs D1, D2, D3 pins
+#if SDMMC_USE_1_LINE_MODE
+    host.flags = SDMMC_HOST_FLAG_1BIT;  // 1-line mode
+    ESP_LOGI(TAG, "Using 1-line SDMMC mode");
+#else
+    ESP_LOGI(TAG, "Using 4-line SDMMC mode");
+#endif
     
     /* ========================================================================
-     * STEP 2: Configure the SD card slot (device on SPI bus)
+     * STEP 2: Configure SDMMC slot GPIO pins
      * ========================================================================
      * 
-     * This structure tells the SD card driver which GPIO to use for chip select
-     * and optionally for card detect. The chip select (CS) line is used to
-     * enable/disable communication with the SD card on the shared SPI bus.
+     * Configure which GPIO pins are used for SDMMC signals.
+     * The Freenove ESP32-S3 uses GPIO 39/40/41 for CLK/CMD/D0.
+     * Adjust these if your board uses different pins.
      */
-    sdspi_device_config_t slot_config = SDSPI_DEVICE_CONFIG_DEFAULT();
-    slot_config.gpio_cs = SD_CS_GPIO;     // GPIO 10 - chip select (active low)
-    slot_config.host_id = SD_SPI_HOST;    // Use SPI2_HOST
+    sdmmc_slot_config_t slot_config = SDMMC_SLOT_CONFIG_DEFAULT();
+    
+    // Set GPIO pins for SDMMC signals (Freenove ESP32-S3-WROOM)
+    slot_config.clk = SD_MMC_CLK_GPIO;  // GPIO 39 - Clock
+    slot_config.cmd = SD_MMC_CMD_GPIO;  // GPIO 38 - Command
+    slot_config.d0 = SD_MMC_D0_GPIO;    // GPIO 40 - Data 0
+    
+#if !SDMMC_USE_1_LINE_MODE
+    // 4-line mode requires additional data lines
+    slot_config.d1 = SD_MMC_D1_GPIO;    // Data 1
+    slot_config.d2 = SD_MMC_D2_GPIO;    // Data 2  
+    slot_config.d3 = SD_MMC_D3_GPIO;    // Data 3
+#endif
+    
+    // Set bus width based on mode
+#if SDMMC_USE_1_LINE_MODE
+    slot_config.width = 1;  // 1-line mode
+#else
+    slot_config.width = 4;  // 4-line mode
+#endif
+    
+    // Enable internal pull-ups (external pull-ups recommended for reliability)
+    // Some boards have them built-in, some don't
+    slot_config.flags |= SDMMC_SLOT_FLAG_INTERNAL_PULLUP;
     
     /* ========================================================================
      * STEP 3: Configure FAT file system mount options
@@ -322,8 +341,8 @@ static esp_err_t sd_card_init(void)
      * STEP 4: Mount the SD card with FAT file system
      * ========================================================================
      * 
-     * esp_vfs_fat_sdspi_mount() does several things:
-     * 1. Initializes the SD card using SPI protocol
+     * esp_vfs_fat_sdmmc_mount() does several things:
+     * 1. Initializes the SD card using SDMMC protocol
      * 2. Detects card type (SDSC, SDHC, SDXC)
      * 3. Reads card information (name, capacity, speed)
      * 4. Mounts FAT file system at the specified mount point
@@ -335,14 +354,10 @@ static esp_err_t sd_card_init(void)
      */
     ESP_LOGI(TAG, "Mounting SD card FAT filesystem at %s...", SD_MOUNT_POINT);
     
-    sdmmc_host_t host = SDSPI_HOST_DEFAULT();
-    // Optionally adjust the host frequency here if needed
-    // host.max_freq_khz = SD_SPI_FREQ_DEFAULT_KHZ;
-    
-    ret = esp_vfs_fat_sdspi_mount(
+    ret = esp_vfs_fat_sdmmc_mount(
         SD_MOUNT_POINT,     // Mount point in VFS (e.g., "/sdcard")
-        &host,              // SD host configuration
-        &slot_config,       // SPI slot configuration (CS pin, etc.)
+        &host,              // SDMMC host configuration
+        &slot_config,       // SDMMC slot configuration (GPIO pins)
         &mount_config,      // FAT mount options
         &sd_card            // Output: pointer to card info structure
     );
@@ -353,13 +368,16 @@ static esp_err_t sd_card_init(void)
                      "If you want the card to be formatted, set format_if_mount_failed = true.");
         } else {
             ESP_LOGE(TAG, "Failed to initialize the card (%s). "
-                     "Make sure SD card is inserted and wiring is correct.", 
+                     "Check: 1) SD card inserted? 2) Correct GPIO pins? 3) FAT32 formatted?", 
                      esp_err_to_name(ret));
         }
-        // Clean up SPI bus on failure
-        spi_bus_free(SD_SPI_HOST);
+        ESP_LOGE(TAG, "Expected SDMMC pins: CLK=%d, CMD=%d, D0=%d",
+                 SD_MMC_CLK_GPIO, SD_MMC_CMD_GPIO, SD_MMC_D0_GPIO);
         return ret;
     }
+    
+    // Mark SD card as successfully initialized (for status display)
+    sd_card_initialized = true;
     
     ESP_LOGI(TAG, "SD card mounted successfully at %s", SD_MOUNT_POINT);
     
@@ -470,7 +488,7 @@ static esp_err_t sd_card_unmount(void)
     
     ESP_LOGI(TAG, "Unmounting SD card...");
     
-    // Unmount the FAT filesystem and release SPI device
+    // Unmount the FAT filesystem
     // This flushes any pending writes and frees resources
     esp_err_t ret = esp_vfs_fat_sdcard_unmount(SD_MOUNT_POINT, sd_card);
     if (ret != ESP_OK) {
@@ -478,14 +496,11 @@ static esp_err_t sd_card_unmount(void)
         return ret;
     }
     
-    // Free the SPI bus
-    ret = spi_bus_free(SD_SPI_HOST);
-    if (ret != ESP_OK) {
-        ESP_LOGE(TAG, "Failed to free SPI bus: %s", esp_err_to_name(ret));
-        return ret;
-    }
+    // Note: SDMMC host is automatically cleaned up by the unmount function
+    // (Unlike SPI mode, no separate bus free is needed)
     
     sd_card = NULL;
+    sd_card_initialized = false;
     ESP_LOGI(TAG, "SD card unmounted successfully");
     
     return ESP_OK;
@@ -1254,13 +1269,19 @@ static esp_err_t usb_msc_mount_locally(void)
 #define LCD_CMD_FUNCTION_8B 0x38      // 8-bit mode, 2 lines, 5x8 font
 #define LCD_CMD_SET_DDRAM   0x80      // Set DDRAM address (OR with address)
 
-// LCD timing delays (from HD44780 datasheet)
-#define LCD_DELAY_INIT_MS       50    // Power-on delay before initialization
-#define LCD_DELAY_INIT_1_MS     5     // First init command delay (>4.1ms)
-#define LCD_DELAY_INIT_2_US     200   // Second init command delay (>100us)
-#define LCD_DELAY_CMD_US        50    // Standard command execution time
-#define LCD_DELAY_CLEAR_MS      2     // Clear command needs longer (>1.52ms)
-#define LCD_DELAY_ENABLE_US     1     // Enable pulse width (>450ns)
+// LCD timing delays (generous values for I2C-based LCD with PCF8574)
+// Note: I2C communication adds ~100us per byte at 100kHz, so we use
+// longer delays than the HD44780 datasheet minimums for reliability
+#define LCD_DELAY_INIT_MS       200   // Power-on delay before initialization 
+#define LCD_DELAY_INIT_1_MS     20    // First init command delay (>4.1ms)
+#define LCD_DELAY_INIT_2_US     2000  // Second init command delay (>100us)
+#define LCD_DELAY_CMD_US        200   // Standard command execution time
+#define LCD_DELAY_CLEAR_MS      10    // Clear command needs longer (>1.52ms)
+#define LCD_DELAY_ENABLE_US     100   // Enable pulse width (>450ns, longer for I2C)
+
+// Some 1602IIC modules have reversed data lines (D7-D4 on P4-P7 instead of P7-P4)
+// Set to 1 if your display shows garbage, 0 for standard wiring
+#define LCD_REVERSE_NIBBLE      0
 
 // LCD row start addresses for common display sizes
 // HD44780 DDRAM is organized non-contiguously for rows
@@ -1339,6 +1360,25 @@ static esp_err_t i2c_init(void)
     ESP_LOGI(TAG, "  SCL: GPIO %d", I2C_SCL_GPIO);
     ESP_LOGI(TAG, "  Speed: %d Hz", I2C_FREQ_HZ);
     
+    // Scan I2C bus to find connected devices (helps identify LCD address)
+    ESP_LOGI(TAG, "Scanning I2C bus for devices...");
+    int devices_found = 0;
+    for (uint8_t addr = 0x20; addr <= 0x3F; addr++) {
+        i2c_cmd_handle_t cmd = i2c_cmd_link_create();
+        i2c_master_start(cmd);
+        i2c_master_write_byte(cmd, (addr << 1) | I2C_MASTER_WRITE, true);
+        i2c_master_stop(cmd);
+        esp_err_t result = i2c_master_cmd_begin(I2C_PORT_NUM, cmd, pdMS_TO_TICKS(50));
+        i2c_cmd_link_delete(cmd);
+        if (result == ESP_OK) {
+            ESP_LOGI(TAG, "  Found device at address 0x%02X", addr);
+            devices_found++;
+        }
+    }
+    if (devices_found == 0) {
+        ESP_LOGW(TAG, "No I2C devices found! Check SDA/SCL wiring.");
+    }
+    
     return ESP_OK;
 }
 
@@ -1389,13 +1429,13 @@ static esp_err_t lcd_i2c_write_byte(uint8_t data)
  */
 static void lcd_pulse_enable(uint8_t data)
 {
-    // Set Enable high
+    // Set Enable high - wait for I2C to complete
     lcd_i2c_write_byte(data | LCD_BIT_E);
-    esp_rom_delay_us(LCD_DELAY_ENABLE_US);
+    esp_rom_delay_us(500);  // 500us for I2C completion
     
     // Set Enable low (data latched on falling edge)
     lcd_i2c_write_byte(data & ~LCD_BIT_E);
-    esp_rom_delay_us(LCD_DELAY_CMD_US);
+    esp_rom_delay_us(500);  // 500us for command execution
 }
 
 /**
@@ -1409,6 +1449,17 @@ static void lcd_pulse_enable(uint8_t data)
  */
 static void lcd_write_nibble(uint8_t nibble, uint8_t rs_flag)
 {
+    // Apply nibble reversal if configured (for modules with swapped D4-D7 lines)
+#if LCD_REVERSE_NIBBLE
+    // Reverse bits: swap bit positions 7<->4, 6<->5
+    uint8_t reversed = 0;
+    if (nibble & 0x80) reversed |= 0x10;  // bit 7 -> bit 4
+    if (nibble & 0x40) reversed |= 0x20;  // bit 6 -> bit 5
+    if (nibble & 0x20) reversed |= 0x40;  // bit 5 -> bit 6
+    if (nibble & 0x10) reversed |= 0x80;  // bit 4 -> bit 7
+    nibble = reversed;
+#endif
+    
     // Combine nibble data with control bits
     // - Upper 4 bits: data (D4-D7)
     // - Bit 3: backlight state
@@ -1468,6 +1519,8 @@ static void lcd_send_command(uint8_t cmd)
 static void lcd_send_data(uint8_t data)
 {
     lcd_write_byte(data, LCD_BIT_RS);  // RS=1 for data
+    // Allow LCD time to process the character (HD44780 needs ~37us)
+    esp_rom_delay_us(100);
 }
 
 /**
@@ -1520,6 +1573,8 @@ static esp_err_t lcd_init(void)
      * 
      * Note: During initialization, we send only the upper nibble (0x30)
      * because the LCD is still in 8-bit mode and ignores the lower nibble.
+     * 
+     * IMPORTANT: We use generous delays for I2C-based LCD reliability.
      */
     
     // Step 1: Send 0x30 (Function Set: 8-bit mode) - first attempt
@@ -1529,16 +1584,16 @@ static esp_err_t lcd_init(void)
     
     // Step 2: Send 0x30 again - second attempt
     lcd_write_nibble(0x30, 0);
-    esp_rom_delay_us(LCD_DELAY_INIT_2_US);  // Wait >100us
+    vTaskDelay(pdMS_TO_TICKS(5));  // Wait 5ms (generous for I2C)
     
     // Step 3: Send 0x30 again - third attempt (LCD is now reliably in 8-bit mode)
     lcd_write_nibble(0x30, 0);
-    esp_rom_delay_us(LCD_DELAY_INIT_2_US);
+    vTaskDelay(pdMS_TO_TICKS(5));  // Wait 5ms
     
     // Step 4: Switch to 4-bit mode by sending 0x20
     // After this, all subsequent communication is 4-bit (two nibbles per byte)
     lcd_write_nibble(0x20, 0);  // 0010 xxxx = 4-bit mode
-    esp_rom_delay_us(LCD_DELAY_INIT_2_US);
+    vTaskDelay(pdMS_TO_TICKS(5));  // Wait 5ms for mode switch
     
     /* ====================================================================
      * LCD CONFIGURATION (now in 4-bit mode)
@@ -1548,10 +1603,12 @@ static esp_err_t lcd_init(void)
     // Function Set: 4-bit mode, 2 lines, 5x8 font
     // 0x28 = 0010 1000 = DL=0 (4-bit), N=1 (2 lines), F=0 (5x8 font)
     lcd_send_command(LCD_CMD_FUNCTION_4B);
+    vTaskDelay(pdMS_TO_TICKS(2));
     
     // Display Control: Display ON, cursor OFF, blink OFF
     // 0x0C = 0000 1100 = D=1 (display on), C=0 (cursor off), B=0 (blink off)
     lcd_send_command(LCD_CMD_DISPLAY_ON);
+    vTaskDelay(pdMS_TO_TICKS(2));
     
     // Clear Display: Clear all characters and return cursor home
     lcd_send_command(LCD_CMD_CLEAR);
@@ -1560,6 +1617,7 @@ static esp_err_t lcd_init(void)
     // Entry Mode Set: Cursor moves right, no display shift
     // 0x06 = 0000 0110 = I/D=1 (increment), S=0 (no shift)
     lcd_send_command(LCD_CMD_ENTRY_MODE);
+    vTaskDelay(pdMS_TO_TICKS(2));
     
     ESP_LOGI(TAG, "LCD initialization complete");
     ESP_LOGI(TAG, "LCD ready for display operations");
@@ -1610,6 +1668,9 @@ static void lcd_set_cursor(uint8_t row, uint8_t col)
     
     // Set DDRAM address command: 0x80 | address
     lcd_send_command(LCD_CMD_SET_DDRAM | address);
+    
+    // Small delay after cursor movement for I2C LCD reliability
+    esp_rom_delay_us(500);
 }
 
 /**
@@ -1633,9 +1694,13 @@ static void lcd_print(const char *text)
     }
     
     // Send each character until null terminator
+    // Add delay between characters for reliable I2C LCD operation
     while (*text) {
         lcd_send_data((uint8_t)*text);
         text++;
+        // Small delay between characters for I2C LCD reliability
+        // The PCF8574 I2C expander adds latency that requires this
+        esp_rom_delay_us(500);  // 500us per character
     }
 }
 
@@ -2060,20 +2125,26 @@ static esp_err_t rtc_load_from_sd(void)
 }
 
 /**
- * @brief FreeRTOS task for updating the LCD with current time
+ * @brief FreeRTOS task for updating the LCD with current time and status
  * 
  * This task runs continuously and updates the LCD display with:
- * - Line 1: Date in format "YYYY-MM-DD" (ISO 8601)
- * - Line 2: Time in format "HH:MM:SS" (24-hour)
+ * - Row 0: Date (MM/DD) and status indicators (SD/USB)
+ * - Row 1: Time in format "HH:MM:SS" (24-hour, centered)
  * 
  * The task updates once per second, synchronized with the RTC timer.
- * We use a simple delay rather than synchronization primitives for simplicity.
+ * Status indicators update immediately when state changes.
  * 
- * LCD LAYOUT (16x2):
+ * LCD LAYOUT (16x2) with Status Indicators:
  * +----------------+
- * |  2026-02-18    |  <- Row 0: Date (centered)
+ * |02/18 SD:Y USB:N|  <- Row 0: Date + SD status + USB status
  * |    12:00:00    |  <- Row 1: Time (centered)
  * +----------------+
+ * 
+ * STATUS INDICATOR MEANINGS:
+ * - SD:Y = SD card initialized and mounted successfully
+ * - SD:N = SD card failed to initialize
+ * - USB:Y = USB host (PC) is connected and accessing storage
+ * - USB:N = USB not connected or PC not accessing storage
  * 
  * @param pvParameters Task parameters (unused)
  */
@@ -2082,42 +2153,91 @@ static void clock_task(void *pvParameters)
     (void)pvParameters;  // Unused
     
     // Buffers for formatted strings
-    // Date: "YYYY-MM-DD" = 10 chars + null
-    // Time: "HH:MM:SS" = 8 chars + null
-    char date_str[17];  // Extra space for padding
-    char time_str[17];
+    // Row 0: "MM/DD SD:Y USB:N" = 16 chars for display
+    // Row 1: "    HH:MM:SS    " = 16 chars for display
+    // Using larger buffers (24) to prevent compiler truncation warnings
+    // when format specifiers could theoretically overflow (e.g., %02d > 2 digits)
+    char row0_str[24];  // Date and status
+    char row1_str[24];  // Time
     
-    // Store previous second to detect changes
-    uint8_t prev_second = 255;  // Invalid value forces first update
+    // Store previous values to detect changes (reduces unnecessary LCD updates)
+    uint8_t prev_second = 255;        // Invalid value forces first update
+    bool prev_sd_status = false;      // Previous SD card status
+    bool prev_usb_status = false;     // Previous USB status
+    bool force_update = true;         // Force full update on first iteration
     
     ESP_LOGI(TAG, "Clock display task started");
+    ESP_LOGI(TAG, "LCD Layout: Row 0 = Date + Status, Row 1 = Time");
     
     while (1) {
-        // Only update LCD when second changes (reduces I2C traffic)
-        if (current_datetime.second != prev_second) {
-            prev_second = current_datetime.second;
+        // Check if any displayed value has changed
+        bool time_changed = (current_datetime.second != prev_second);
+        bool sd_changed = (sd_card_initialized != prev_sd_status);
+        bool usb_changed = (usb_msc_active != prev_usb_status);
+        
+        // Update display if anything changed or forced
+        if (time_changed || sd_changed || usb_changed || force_update) {
             
-            // Format date string: "  YYYY-MM-DD  " (centered on 16 chars)
-            snprintf(date_str, sizeof(date_str), "  %04d-%02d-%02d  ",
-                     current_datetime.year,
+            /* ================================================================
+             * ROW 0: Date and Status Indicators
+             * ================================================================
+             * Format: "MM/DD SD:Y USB:N"
+             *         01234567890123456
+             * 
+             * Characters:
+             * - 0-4:  Date in MM/DD format (5 chars)
+             * - 5:    Space separator
+             * - 6-9:  "SD:" + status character (4 chars)
+             * - 10:   Space separator
+             * - 11-15: "USB:" + status character (5 chars)
+             */
+            snprintf(row0_str, sizeof(row0_str), "%02d/%02d SD:%c USB:%c",
                      current_datetime.month,
-                     current_datetime.day);
+                     current_datetime.day,
+                     sd_card_initialized ? 'Y' : 'N',
+                     usb_msc_active ? 'Y' : 'N');
+            row0_str[16] = '\0';  // Ensure 16 char max for LCD
             
-            // Format time string: "    HH:MM:SS    " (centered on 16 chars)
-            snprintf(time_str, sizeof(time_str), "    %02d:%02d:%02d    ",
+            /* ================================================================
+             * ROW 1: Time (centered)
+             * ================================================================
+             * Format: "    HH:MM:SS    "
+             *         0123456789012345
+             * 
+             * 4 spaces + 8 char time + 4 spaces = 16 chars
+             */
+            snprintf(row1_str, sizeof(row1_str), "    %02d:%02d:%02d    ",
                      current_datetime.hour,
                      current_datetime.minute,
                      current_datetime.second);
+            row1_str[16] = '\0';  // Ensure 16 char max for LCD
             
             // Update LCD - use set_cursor to avoid clearing (reduces flicker)
+            // Always update both rows to keep display consistent
             lcd_set_cursor(0, 0);
-            lcd_print(date_str);
+            lcd_print(row0_str);
             
             lcd_set_cursor(1, 0);
-            lcd_print(time_str);
+            lcd_print(row1_str);
+            
+            // Update tracking variables
+            prev_second = current_datetime.second;
+            prev_sd_status = sd_card_initialized;
+            prev_usb_status = usb_msc_active;
+            force_update = false;
+            
+            // Log status changes (helpful for debugging)
+            if (sd_changed) {
+                ESP_LOGI(TAG, "LCD: SD status changed to %s", 
+                         sd_card_initialized ? "OK" : "FAIL");
+            }
+            if (usb_changed) {
+                ESP_LOGI(TAG, "LCD: USB status changed to %s",
+                         usb_msc_active ? "CONNECTED" : "DISCONNECTED");
+            }
         }
         
-        // Poll at 100ms for responsive display
+        // Poll at 100ms for responsive status updates
         // This is a reasonable tradeoff between responsiveness and CPU usage
         vTaskDelay(pdMS_TO_TICKS(100));
     }
@@ -2157,76 +2277,264 @@ static esp_err_t clock_task_start(void)
 }
 
 /* ============================================================================
- * MAIN APPLICATION ENTRY POINT
+ * MAIN APPLICATION ENTRY POINT (Phase 7 - Full Integration)
  * ============================================================================ */
 
 /**
- * @brief Application entry point
+ * @brief Application entry point - Integrates all components
  * 
- * Initializes all components and starts tasks:
- * 1. Initialize SD card (SPI, mount FAT)
- * 2. Perform file operation demos
- * 3. Initialize I2C and LCD
- * 4. Initialize USB MSC
- * 5. Start clock display task
- * 6. Start USB task
+ * STARTUP SEQUENCE (ordered for dependencies):
+ * ============================================
+ * 
+ * 1. MUTEX CREATION (Required by all phases for thread safety)
+ *    - Create SD card access mutex for USB/local coordination
+ * 
+ * 2. SD CARD INITIALIZATION (Phase 2 - Foundation)
+ *    - Initialize SPI bus for SD card communication
+ *    - Mount FAT file system at /sdcard
+ *    - Display SD card info (type, capacity)
+ *    - WHY FIRST: USB MSC and file operations depend on this
+ * 
+ * 3. FILE OPERATIONS DEMO (Phase 3 - Verify SD works)
+ *    - Create, read, append files
+ *    - List directory contents
+ *    - WHY EARLY: Confirms SD card is working before USB takes over
+ * 
+ * 4. I2C AND LCD INITIALIZATION (Phase 5 - Display setup)
+ *    - Initialize I2C master on GPIO 8/9
+ *    - Initialize HD44780 LCD in 4-bit mode
+ *    - Display startup message
+ *    - WHY BEFORE USB: Want to show status during USB setup
+ * 
+ * 5. SOFTWARE RTC INITIALIZATION (Phase 6 - Timekeeping)
+ *    - Try to load saved time from SD card
+ *    - Start 1-second FreeRTOS timer
+ *    - WHY BEFORE CLOCK TASK: Timer must be running for clock display
+ * 
+ * 6. USB MASS STORAGE INITIALIZATION (Phase 4 - Takes over SD)
+ *    - Unmount local FAT filesystem
+ *    - Initialize TinyUSB MSC with SD card
+ *    - PC can now access SD card as removable drive
+ *    - WHY LATE: Takes exclusive SD access, file ops must be done first
+ * 
+ * 7. CLOCK DISPLAY TASK (Phase 6 - Continuous operation)
+ *    - Start FreeRTOS task to update LCD with time
+ *    - Runs continuously at low priority
+ *    - WHY LAST: All display infrastructure must be ready
+ * 
+ * ERROR HANDLING STRATEGY:
+ * ========================
+ * - Each phase checks for errors and logs details
+ * - Critical failures (SD, I2C) halt startup with return
+ * - Non-critical failures (time load) log warnings and continue
+ * - LCD shows error status if initialization fails
  */
 void app_main(void)
 {
-    ESP_LOGI(TAG, "=== SD Card, USB MSC, and LCD Clock Demo ===");
-    ESP_LOGI(TAG, "Initializing components...");
+    esp_err_t ret;
     
-    // Create mutex for SD card access coordination (USB vs local)
+    ESP_LOGI(TAG, "");
+    ESP_LOGI(TAG, "========================================");
+    ESP_LOGI(TAG, "  SD Card, USB MSC, and LCD Clock Demo  ");
+    ESP_LOGI(TAG, "========================================");
+    ESP_LOGI(TAG, "");
+    ESP_LOGI(TAG, "Starting component initialization...");
+    
+    /* ========================================================================
+     * STEP 1: Create synchronization primitives
+     * ========================================================================
+     * 
+     * The SD card access mutex coordinates between USB MSC operations and
+     * local file operations. Although USB MSC has exclusive access while
+     * connected, we need the mutex for safe transition between modes.
+     */
+    ESP_LOGI(TAG, "");
+    ESP_LOGI(TAG, "[1/7] Creating synchronization primitives...");
+    
     sd_access_mutex = xSemaphoreCreateMutex();
     if (sd_access_mutex == NULL) {
-        ESP_LOGE(TAG, "Failed to create SD access mutex");
+        ESP_LOGE(TAG, "FATAL: Failed to create SD access mutex");
+        ESP_LOGE(TAG, "System cannot continue without thread safety");
         return;
     }
+    ESP_LOGI(TAG, "       Mutex created successfully");
     
-    // Phase 2: Initialize SD card and mount FAT file system
-    esp_err_t ret = sd_card_init();
+    /* ========================================================================
+     * STEP 2: Initialize SD card and mount FAT file system (Phase 2)
+     * ========================================================================
+     * 
+     * The SD card is the foundation for file storage. We must initialize it
+     * before any file operations or USB MSC setup can proceed.
+     */
+    ESP_LOGI(TAG, "");
+    ESP_LOGI(TAG, "[2/7] Initializing SD card (Phase 2)...");
+    
+    ret = sd_card_init();
     if (ret != ESP_OK) {
-        ESP_LOGE(TAG, "SD card initialization failed!");
-        ESP_LOGE(TAG, "Check wiring: MOSI=GPIO%d, MISO=GPIO%d, CLK=GPIO%d, CS=GPIO%d",
-                 SD_MOSI_GPIO, SD_MISO_GPIO, SD_CLK_GPIO, SD_CS_GPIO);
+        ESP_LOGE(TAG, "FATAL: SD card initialization failed!");
+        ESP_LOGE(TAG, "Check SD card slot connections (SDMMC mode):");
+        ESP_LOGE(TAG, "  CLK  -> GPIO %d", SD_MMC_CLK_GPIO);
+        ESP_LOGE(TAG, "  CMD  -> GPIO %d", SD_MMC_CMD_GPIO);
+        ESP_LOGE(TAG, "  D0   -> GPIO %d", SD_MMC_D0_GPIO);
+        ESP_LOGE(TAG, "Ensure SD card is inserted and formatted as FAT32");
         return;
     }
     
-    ESP_LOGI(TAG, "Phase 2 complete: SD card initialized and mounted");
+    // Display SD card information
+    sd_card_print_info();
+    ESP_LOGI(TAG, "       SD card mounted at %s", SD_MOUNT_POINT);
     
-    // Phase 3: Demonstrate file operations
+    /* ========================================================================
+     * STEP 3: Demonstrate file operations (Phase 3)
+     * ========================================================================
+     * 
+     * Run file operation demos to verify SD card is working properly.
+     * This must happen while we have local FAT access (before USB MSC).
+     */
+    ESP_LOGI(TAG, "");
+    ESP_LOGI(TAG, "[3/7] Running file operations demo (Phase 3)...");
+    
     file_operations_demo();
+    ESP_LOGI(TAG, "       File operations completed");
     
-    ESP_LOGI(TAG, "Phase 3 complete: File operations demonstrated");
+    /* ========================================================================
+     * STEP 4: Initialize I2C and LCD display (Phase 5)
+     * ========================================================================
+     * 
+     * Set up the LCD before USB MSC so we can display status during the
+     * somewhat slow USB enumeration process.
+     * 
+     * HARDWARE REMINDER: 1k Ohm pull-up resistors required on SDA/SCL!
+     */
+    ESP_LOGI(TAG, "");
+    ESP_LOGI(TAG, "[4/7] Initializing I2C and LCD (Phase 5)...");
     
-    // Phase 4: Initialize USB Mass Storage
-    // First unmount the FAT filesystem we mounted in Phase 2
-    // because the tinyusb_msc component will manage it
-    ESP_LOGI(TAG, "Preparing for USB MSC - unmounting local FAT...");
-    ret = esp_vfs_fat_sdcard_unmount(SD_MOUNT_POINT, sd_card);
+    ret = i2c_init();
     if (ret != ESP_OK) {
-        ESP_LOGW(TAG, "Failed to unmount FAT: %s (may already be unmounted)", esp_err_to_name(ret));
+        ESP_LOGE(TAG, "FATAL: I2C initialization failed!");
+        ESP_LOGE(TAG, "Check hardware connections:");
+        ESP_LOGE(TAG, "  SDA -> GPIO %d with 1k pull-up to 3.3V", I2C_SDA_GPIO);
+        ESP_LOGE(TAG, "  SCL -> GPIO %d with 1k pull-up to 3.3V", I2C_SCL_GPIO);
+        ESP_LOGE(TAG, "  VCC -> 5V (or 3.3V if module supports)");
+        ESP_LOGE(TAG, "  GND -> GND");
+        // Continue without LCD - not fatal, but display won't work
+        ESP_LOGW(TAG, "Continuing without LCD display...");
+    } else {
+        ret = lcd_init();
+        if (ret != ESP_OK) {
+            ESP_LOGE(TAG, "LCD initialization failed!");
+            ESP_LOGE(TAG, "Check LCD I2C address (currently 0x%02X)", LCD_I2C_ADDR);
+            ESP_LOGW(TAG, "Continuing without LCD display...");
+        } else {
+            // Show startup message on LCD
+            lcd_clear();
+            lcd_set_cursor(0, 0);
+            lcd_print("  SD/USB/Clock  ");
+            lcd_set_cursor(1, 0);
+            lcd_print("  Initializing  ");
+            ESP_LOGI(TAG, "       LCD initialized and showing startup message");
+        }
     }
     
-    // Don't free SPI bus - we still need it for USB MSC
-    // The sd_card pointer remains valid
+    /* ========================================================================
+     * STEP 5: Initialize software RTC (Phase 6)
+     * ========================================================================
+     * 
+     * Start the real-time clock before the display task so time is ready
+     * to be shown. Try to restore saved time from SD card.
+     */
+    ESP_LOGI(TAG, "");
+    ESP_LOGI(TAG, "[5/7] Initializing software RTC (Phase 6)...");
     
+    // Try to load saved time from SD card (non-fatal if fails)
+    ret = rtc_load_from_sd();
+    if (ret != ESP_OK) {
+        ESP_LOGW(TAG, "       Using default time (no saved time found)");
+    }
+    
+    // Initialize and start the RTC timer
+    ret = rtc_init();
+    if (ret != ESP_OK) {
+        ESP_LOGE(TAG, "RTC initialization failed!");
+        ESP_LOGW(TAG, "Clock display will not update");
+    } else {
+        ESP_LOGI(TAG, "       RTC started, ticking every second");
+    }
+    
+    /* ========================================================================
+     * STEP 6: Initialize USB Mass Storage (Phase 4)
+     * ========================================================================
+     * 
+     * USB MSC takes exclusive access to the SD card. We must unmount the
+     * local FAT filesystem first. After this, file operations from ESP32
+     * require special handling (unmount USB, mount local, do operation,
+     * unmount local, remount USB).
+     */
+    ESP_LOGI(TAG, "");
+    ESP_LOGI(TAG, "[6/7] Initializing USB Mass Storage (Phase 4)...");
+    
+    // Update LCD to show USB setup in progress
+    lcd_set_cursor(1, 0);
+    lcd_print("  USB Setup...  ");
+    
+    // NOTE: Do NOT unmount the FAT filesystem!
+    // esp_vfs_fat_sdcard_unmount() deinitializes the SDMMC driver, which breaks
+    // USB MSC sector access. Instead, we keep FAT mounted - USB MSC can coexist
+    // with it because USB MSC uses sector-level access (sdmmc_read_sectors)
+    // while FAT uses file-level access. The usb_msc_mount_changed_cb callback
+    // sets usb_msc_active=true when PC mounts, blocking local file operations.
+    ESP_LOGI(TAG, "       Keeping FAT mounted (USB MSC uses sector-level access)...");
+    
+    // Initialize USB MSC (sd_card pointer provides sector access)
     ret = usb_msc_init();
     if (ret != ESP_OK) {
         ESP_LOGE(TAG, "USB MSC initialization failed!");
-        return;
+        lcd_set_cursor(1, 0);
+        lcd_print("  USB ERROR!    ");
+        // Continue - SD card still works, just no USB access
+        ESP_LOGW(TAG, "Continuing without USB Mass Storage...");
+    } else {
+        ESP_LOGI(TAG, "       USB MSC ready - connect to PC");
     }
     
-    ESP_LOGI(TAG, "Phase 4 complete: USB MSC initialized");
+    /* ========================================================================
+     * STEP 7: Start clock display task (Phase 6)
+     * ========================================================================
+     * 
+     * Now that LCD and RTC are initialized, start the task that continuously
+     * updates the display with current date and time.
+     */
+    ESP_LOGI(TAG, "");
+    ESP_LOGI(TAG, "[7/7] Starting clock display task (Phase 6)...");
+    
+    ret = clock_task_start();
+    if (ret != ESP_OK) {
+        ESP_LOGE(TAG, "Failed to start clock display task");
+        ESP_LOGW(TAG, "LCD will not show time updates");
+    } else {
+        ESP_LOGI(TAG, "       Clock task running");
+    }
+    
+    /* ========================================================================
+     * INITIALIZATION COMPLETE
+     * ======================================================================== */
     ESP_LOGI(TAG, "");
     ESP_LOGI(TAG, "========================================");
-    ESP_LOGI(TAG, "USB MASS STORAGE READY");
-    ESP_LOGI(TAG, "========================================");
-    ESP_LOGI(TAG, "Connect ESP32-S3 USB port to PC");
-    ESP_LOGI(TAG, "A removable drive should appear");
-    ESP_LOGI(TAG, "You can browse, create, and modify files");
-    ESP_LOGI(TAG, "Safely eject before disconnecting");
+    ESP_LOGI(TAG, "    INITIALIZATION COMPLETE            ");
     ESP_LOGI(TAG, "========================================");
     ESP_LOGI(TAG, "");
-    ESP_LOGI(TAG, "Next: Implement Phase 5 (LCD) and beyond...");
+    ESP_LOGI(TAG, "SYSTEM STATUS:");
+    ESP_LOGI(TAG, "  SD Card:  Mounted and accessible via USB");
+    ESP_LOGI(TAG, "  USB MSC:  Ready - connect to PC");
+    ESP_LOGI(TAG, "  LCD:      Displaying clock");
+    ESP_LOGI(TAG, "  RTC:      Running (software-based)");
+    ESP_LOGI(TAG, "");
+    ESP_LOGI(TAG, "USAGE:");
+    ESP_LOGI(TAG, "  1. Connect USB to PC - appears as removable drive");
+    ESP_LOGI(TAG, "  2. Browse, create, modify files from PC");
+    ESP_LOGI(TAG, "  3. Safely eject before disconnecting");
+    ESP_LOGI(TAG, "  4. LCD shows current date and time");
+    ESP_LOGI(TAG, "");
+    ESP_LOGI(TAG, "NOTE: Time resets on power cycle unless saved to SD");
+    ESP_LOGI(TAG, "========================================");
 }

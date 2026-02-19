@@ -1,3 +1,7 @@
+# week4: Ignore everything except sd_usb_lcd directory
+week4/*
+!week4/sd_usb_lcd/
+
 # week3: Ignore everything except task_priority directory
 week3/*
 !week3/task_priority/

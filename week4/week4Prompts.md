@@ -496,16 +496,51 @@ idf.py -p /dev/ttyACM0 flash monitor
 
 ## Phase 9: Optional - Servo Control with Accelerometer
 
+### Hardware Information: MPU6050 Accelerometer/Gyroscope
+
+The MPU6050 is a 6-axis motion tracking device with 3-axis accelerometer and 3-axis gyroscope.
+
+**MPU6050 Module Pinout (8 pins):**
+| Pin | Function | Connect To |
+|-----|----------|------------|
+| VCC | Power supply | 3.3V (NOT 5V - module has onboard regulator but ESP32 I2C is 3.3V) |
+| GND | Ground | GND rail |
+| SCL | I2C Clock | GPIO 9 (shared with LCD) |
+| SDA | I2C Data | GPIO 8 (shared with LCD) |
+| XDA | Auxiliary I2C Data | Leave unconnected |
+| XCL | Auxiliary I2C Clock | Leave unconnected |
+| AD0 | I2C Address select | GND (address = 0x68) or 3.3V (address = 0x69) |
+| INT | Interrupt output | Leave unconnected (or connect to GPIO for motion interrupts) |
+
+**I2C Configuration:**
+- I2C Address: 0x68 (AD0 = GND) or 0x69 (AD0 = HIGH)
+- Shares I2C bus with LCD (0x27) - both devices on GPIO 8/9
+- Uses same 1k pull-up resistors on SDA/SCL as LCD
+- I2C Speed: 100kHz (standard mode, compatible with both LCD and MPU6050)
+
+**Servo Motor (SG90) Wiring:**
+| Wire Color | Connect To |
+|------------|------------|
+| Red | 5V rail |
+| Brown/Black | GND rail |
+| Orange/Yellow | GPIO 4 (PWM signal) |
+
+**Current Hardware Configuration:**
+- GPIO 8: I2C SDA (LCD + MPU6050) with 1k pull-up to 3.3V
+- GPIO 9: I2C SCL (LCD + MPU6050) with 1k pull-up to 3.3V
+- GPIO 4: Servo PWM output
+- GPIO 38/39/40: SDMMC (onboard SD card slot - CMD/CLK/D0)
+
 ### Prompt 9.1
 "Configure I2C for MPU6050 accelerometer (if implementing optional feature):
-- Share I2C bus with LCD or use second I2C port
-- Configure MPU6050 I2C address (typically 0x68)
+- Share I2C bus with LCD (already initialized on GPIO 8/9)
+- Configure MPU6050 I2C address (0x68 with AD0 to GND)
 - Initialize MPU6050 with appropriate settings
 - Include detailed comments"
 
 ### Manual Tests to Verify Completion of Prompt 9.1
 - [ ] I2C configured for MPU6050
-- [ ] Correct I2C address used
+- [ ] Correct I2C address used (0x68)
 - [ ] MPU6050 initialization succeeds
 - [ ] Comments explain configuration
 

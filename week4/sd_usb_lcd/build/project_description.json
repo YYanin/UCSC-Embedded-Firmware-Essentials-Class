@@ -1,7 +1,7 @@
 {
     "version":            "1.1",
     "project_name":       "sd_usb_lcd",
-    "project_version":    "a80358f",
+    "project_version":    "6842277-dirty",
     "project_path":       "/home/nordiffico/esp/projects/week4/sd_usb_lcd",
     "idf_path":           "/home/nordiffico/esp/esp-idf",
     "build_dir":          "/home/nordiffico/esp/projects/week4/sd_usb_lcd/build",

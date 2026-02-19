@@ -1,0 +1,35 @@
+[1/9] Performing build step for 'bootloader'
+[1/1] cd /home/nordiffico/esp/projects/week4/sd_usb_lcd/build/bootloader/esp-idf/esptool_py && /home/nordiffico/.espressif/python_env/idf5.3_py3.12_env/bin/python /home/nordiffico/esp/esp-idf/components/partition_table/check_sizes.py --offset 0x8000 bootloader 0x0 /home/nordiffico/esp/projects/week4/sd_usb_lcd/build/bootloader/bootloader.bin
+Bootloader binary size 0x5490 bytes. 0x2b70 bytes (34%) free.
+[2/9] No install step for 'bootloader'
+[3/9] Completed 'bootloader'
+[4/9] Building C object esp-idf/main/CMakeFiles/__idf_main.dir/main.c.obj
+/home/nordiffico/esp/projects/week4/sd_usb_lcd/main/main.c:2058:18: warning: 'rtc_save_to_sd' defined but not used [-Wunused-function]
+ 2058 | static esp_err_t rtc_save_to_sd(void)
+      |                  ^~~~~~~~~~~~~~
+/home/nordiffico/esp/projects/week4/sd_usb_lcd/main/main.c:1715:13: warning: 'lcd_backlight' defined but not used [-Wunused-function]
+ 1715 | static void lcd_backlight(bool on)
+      |             ^~~~~~~~~~~~~
+/home/nordiffico/esp/projects/week4/sd_usb_lcd/main/main.c:1174:18: warning: 'usb_msc_mount_locally' defined but not used [-Wunused-function]
+ 1174 | static esp_err_t usb_msc_mount_locally(void)
+      |                  ^~~~~~~~~~~~~~~~~~~~~
+/home/nordiffico/esp/projects/week4/sd_usb_lcd/main/main.c:1142:18: warning: 'usb_msc_expose_to_host' defined but not used [-Wunused-function]
+ 1142 | static esp_err_t usb_msc_expose_to_host(void)
+      |                  ^~~~~~~~~~~~~~~~~~~~~~
+/home/nordiffico/esp/projects/week4/sd_usb_lcd/main/main.c:1116:13: warning: 'usb_msc_task' defined but not used [-Wunused-function]
+ 1116 | static void usb_msc_task(void *pvParameters)
+      |             ^~~~~~~~~~~~
+/home/nordiffico/esp/projects/week4/sd_usb_lcd/main/main.c:482:18: warning: 'sd_card_unmount' defined but not used [-Wunused-function]
+  482 | static esp_err_t sd_card_unmount(void)
+      |                  ^~~~~~~~~~~~~~~
+[5/9] Linking C static library esp-idf/main/libmain.a
+[6/9] Generating ld/sections.ld
+[7/9] Linking CXX executable sd_usb_lcd.elf
+[8/9] Generating binary image from built executable
+esptool.py v4.10.0
+Creating esp32s3 image...
+Merged 2 ELF sections
+Successfully created esp32s3 image.
+Generated /home/nordiffico/esp/projects/week4/sd_usb_lcd/build/sd_usb_lcd.bin
+[9/9] cd /home/nordiffico/esp/projects/week4/sd_usb_lcd/build/esp-idf/esptool_py && /home/nordiffico/.espressif/python_env/idf5.3_py3.12_env/bin/python /home/nordiffico/esp/esp-idf/components/partition_table/check_sizes.py --offset 0x8000 partition --type app /home/nordiffico/esp/projects/week4/sd_usb_lcd/build/partition_table/partition-table.bin /home/nordiffico/esp/projects/week4/sd_usb_lcd/build/sd_usb_lcd.bin
+sd_usb_lcd.bin binary size 0x5c320 bytes. Smallest app partition is 0x100000 bytes. 0xa3ce0 bytes (64%) free.

@@ -1,1 +1,9 @@
-a80358f62a051dea3342bf058806298dccef5bd4
+0000000000000000000000000000000000000000 f55e38df40b2039a7f8bb273080555268d1723ad yyanin <yaroslav1304@gmail.com> 1770848364 -0800	commit (initial): first commit
+f55e38df40b2039a7f8bb273080555268d1723ad f55e38df40b2039a7f8bb273080555268d1723ad yyanin <yaroslav1304@gmail.com> 1770848364 -0800	Branch: renamed refs/heads/master to refs/heads/main
+f55e38df40b2039a7f8bb273080555268d1723ad e22a18b0e9b04c0d13e11db99e8c5828c58533e6 yyanin <yaroslav1304@gmail.com> 1770848532 -0800	commit: Commit
+e22a18b0e9b04c0d13e11db99e8c5828c58533e6 056f1844e4b98ec9e760dcc6b1f0328dd41e76cc yyanin <yaroslav1304@gmail.com> 1770853710 -0800	commit: Completed week3 and added a .gitignore file to the repo
+056f1844e4b98ec9e760dcc6b1f0328dd41e76cc 16e49fbbac29ac3e177429946d2f705f70779c81 yyanin <yaroslav1304@gmail.com> 1770854095 -0800	commit: Modified the README file in the parent directory to reflect the structure of the repo
+16e49fbbac29ac3e177429946d2f705f70779c81 1b8a6b97ed53561e960f19458253154e1dd0537c yyanin <yaroslav1304@gmail.com> 1770854376 -0800	commit: Grabbed the EFE projects repo into my repo as per assignment 3
+1b8a6b97ed53561e960f19458253154e1dd0537c a351be3a3236ce0459bd3b0c30185dd9f491bbe1 yyanin <yaroslav1304@gmail.com> 1770854795 -0800	commit: Updated the README
+a351be3a3236ce0459bd3b0c30185dd9f491bbe1 a80358f62a051dea3342bf058806298dccef5bd4 yyanin <yaroslav1304@gmail.com> 1770859669 -0800	commit: Added lights to the week3 project
+a80358f62a051dea3342bf058806298dccef5bd4 68422771f9bde1110ec8902309a50d4f0929e946 yyanin <yaroslav1304@gmail.com> 1771404325 -0800	commit: Working on week 4. Implemented the clock. Next is the main app integration
