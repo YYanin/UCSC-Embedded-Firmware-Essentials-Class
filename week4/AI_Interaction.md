@@ -492,3 +492,31 @@ Created README.md in sd_usb_lcd/ directory containing:
 - [TODO] User: Record demo video
 - [TODO] User: Push to GitHub repository
 - [TODO] User: Submit repository URL
+
+---
+
+## Additional Documentation (Feb 18, 2026)
+
+### Created topology.md
+Added sd_usb_lcd/topology.md with:
+- File structure diagram
+- System block diagram (ASCII)
+- Initialization sequence flowchart
+- Function groups organized by module:
+  - SD Card Module (Phase 2)
+  - File Operations Module (Phase 3)
+  - USB MSC Module (Phase 4)
+  - LCD Display Module (Phase 5)
+  - RTC Clock Module (Phase 6)
+  - Clock Display Task (Phase 6)
+- Data flow diagram
+- Concurrency model documentation
+- GPIO summary table
+- Memory map approximation
+- Error handling strategy
+- Build dependencies list
+
+### Git Cleanup
+- Removed large file (Freenove zip 233MB) from git history
+- Used git filter-branch to rewrite commits
+- Repository size reduced for GitHub push
