@@ -15,3 +15,20 @@ week1/*
 
 # Ignore AI_Interaction.md in week5
 week5/AI_Interaction.md
+
+# Ignore main.c containing Telegram bot token
+week5/sd_usb_lcd/main/main.c
+
+# ESP-IDF build artifacts (all weeks)
+**/build/
+**/managed_components/
+
+# ESP-IDF generated config (reproducible from sdkconfig.defaults)
+**/sdkconfig
+!**/sdkconfig.defaults
+
+# Week 5 prompt files
+week5/week5[Pp]rompts.md
+
+# Old sdkconfig backups
+**/sdkconfig.old
