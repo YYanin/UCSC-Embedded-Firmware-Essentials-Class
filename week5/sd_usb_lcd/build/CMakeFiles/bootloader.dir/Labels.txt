@@ -1,0 +1,13 @@
+# Target labels
+ bootloader
+# Source files and their labels
+/home/nordiffico/Documents/esp/projects/week5/sd_usb_lcd/build/CMakeFiles/bootloader
+/home/nordiffico/Documents/esp/projects/week5/sd_usb_lcd/build/CMakeFiles/bootloader.rule
+/home/nordiffico/Documents/esp/projects/week5/sd_usb_lcd/build/CMakeFiles/bootloader-complete.rule
+/home/nordiffico/Documents/esp/projects/week5/sd_usb_lcd/build/bootloader-prefix/src/bootloader-stamp/bootloader-build.rule
+/home/nordiffico/Documents/esp/projects/week5/sd_usb_lcd/build/bootloader-prefix/src/bootloader-stamp/bootloader-configure.rule
+/home/nordiffico/Documents/esp/projects/week5/sd_usb_lcd/build/bootloader-prefix/src/bootloader-stamp/bootloader-download.rule
+/home/nordiffico/Documents/esp/projects/week5/sd_usb_lcd/build/bootloader-prefix/src/bootloader-stamp/bootloader-install.rule
+/home/nordiffico/Documents/esp/projects/week5/sd_usb_lcd/build/bootloader-prefix/src/bootloader-stamp/bootloader-mkdir.rule
+/home/nordiffico/Documents/esp/projects/week5/sd_usb_lcd/build/bootloader-prefix/src/bootloader-stamp/bootloader-patch.rule
+/home/nordiffico/Documents/esp/projects/week5/sd_usb_lcd/build/bootloader-prefix/src/bootloader-stamp/bootloader-update.rule

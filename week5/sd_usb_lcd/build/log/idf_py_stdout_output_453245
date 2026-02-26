@@ -1,0 +1,20 @@
+[0/1] cd /home/nordiffico/Documents/esp/projects/week5/sd_usb_lcd/build && /usr/bin/cmake -D "IDF_SIZE_TOOL=/home/nordiffico/.espressif/python_env/idf5.3_py3.12_env/bin/python;-m;esp_idf_size" -D MAP_FILE=/home/nordiffico/Documents/esp/projects/week5/sd_usb_lcd/build/sd_usb_lcd.map -D OUTPUT_JSON= -P /home/nordiffico/Documents/esp/esp-idf/tools/cmake/run_size_tool.cmake
+                            Memory Type Usage Summary                             
+┏━━━━━━━━━━━━━━━━━━━━━┳━━━━━━━━━━━━━━┳━━━━━━━━━━┳━━━━━━━━━━━━━━━━┳━━━━━━━━━━━━━━━┓
+┃ Memory Type/Section ┃ Used [bytes] ┃ Used [%] ┃ Remain [bytes] ┃ Total [bytes] ┃
+┡━━━━━━━━━━━━━━━━━━━━━╇━━━━━━━━━━━━━━╇━━━━━━━━━━╇━━━━━━━━━━━━━━━━╇━━━━━━━━━━━━━━━┩
+│ Flash Code          │       787326 │          │                │               │
+│    .text            │       787326 │          │                │               │
+│ Flash Data          │       245112 │          │                │               │
+│    .rodata          │       244856 │          │                │               │
+│    .appdesc         │          256 │          │                │               │
+│ DIRAM               │       115859 │     33.9 │         225901 │        341760 │
+│    .text            │        77663 │    22.72 │                │               │
+│    .data            │        19780 │     5.79 │                │               │
+│    .bss             │        18416 │     5.39 │                │               │
+│ IRAM                │        16383 │    99.99 │              1 │         16384 │
+│    .text            │        15356 │    93.73 │                │               │
+│    .vectors         │         1027 │     6.27 │                │               │
+│ RTC FAST            │           24 │     0.29 │           8168 │          8192 │
+│    .rtc_reserved    │           24 │     0.29 │                │               │
+└─────────────────────┴──────────────┴──────────┴────────────────┴───────────────┘
