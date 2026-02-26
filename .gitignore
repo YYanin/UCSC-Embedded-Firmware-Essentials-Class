@@ -12,3 +12,6 @@ week1/*
 
 # Ignore AgentConstraints.md files everywhere
 **/AgentConstraints.md
+
+# Ignore AI_Interaction.md in week5
+week5/AI_Interaction.md
