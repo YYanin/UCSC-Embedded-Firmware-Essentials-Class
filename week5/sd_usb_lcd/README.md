@@ -165,7 +165,7 @@ The network uses a hidden SSID. The driver is configured with
 
 The Telegram bot token is configured in `main/main.c`:
 ```c
-#define TELEGRAM_TOKEN "8745173474:AAGRhtDMuCoIJmNWbcv768wsyXLurzzV1Ak"
+#define TELEGRAM_TOKEN ""
 ```
 
 To use your own bot:
